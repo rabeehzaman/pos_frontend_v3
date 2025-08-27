@@ -50,7 +50,7 @@ export function SettingsPage() {
         
         // Auto-select first branch if none selected
         if (!selectedBranch && data.branches.length > 0) {
-          const defaultBranch = data.branches.find((b: any) => b.is_primary || b.is_default) || data.branches[0]
+          const defaultBranch = data.branches.find((b: { is_primary?: boolean; is_default?: boolean; branch_id: string; branch_name: string }) => b.is_primary || b.is_default) || data.branches[0]
           setSelectedBranch({
             id: defaultBranch.branch_id,
             name: defaultBranch.branch_name
