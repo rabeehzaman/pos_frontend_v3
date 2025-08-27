@@ -1,0 +1,42 @@
+{
+  "name": "TMR POS - Point of Sale System",
+  "short_name": "TMR POS",
+  "description": "Modern, ultra-minimal point of sale system with Zoho Books integration",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "categories": ["business", "productivity", "finance"],
+  "icons": [
+    {
+      "src": "/icon-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.svg", 
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open Spotlight",
+      "short_name": "Search",
+      "description": "Open the product search",
+      "url": "/?spotlight=true",
+      "icons": [{ "src": "/icon-192x192.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Settings",
+      "short_name": "Settings", 
+      "description": "Configure POS settings",
+      "url": "/settings",
+      "icons": [{ "src": "/icon-192x192.svg", "sizes": "192x192" }]
+    }
+  ]
+}
