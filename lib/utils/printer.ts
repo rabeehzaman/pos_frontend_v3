@@ -1,27 +1,41 @@
-import { toast } from 'sonner'
+'use client'
 
-// Type definition for print-js since @types/print-js doesn't exist
-declare const printJS: {
-  (config: {
-    printable: string | Blob
-    type: 'pdf' | 'html' | 'image' | 'json'
-    base64?: boolean
-    showModal?: boolean
-    modalMessage?: string
-    header?: string
-    headerStyle?: string
-    documentTitle?: string
-    fallbackPrintable?: string
-    onPrintDialogClose?: () => void
-    onError?: (error: Error) => void
-    font_size?: string
-    css?: string | string[]
-    style?: string
-    scanStyles?: boolean
-    targetStyle?: string | string[]
-    targetStyles?: string | string[]
-    ignoreElements?: string | string[]
-  }): void
+import { toast } from 'sonner'
+import printJS from 'print-js'
+
+// Type definition for print-js configuration
+interface PrintJSConfig {
+  printable: string | Blob
+  type: 'pdf' | 'html' | 'image' | 'json'
+  base64?: boolean
+  showModal?: boolean
+  modalMessage?: string
+  header?: string
+  headerStyle?: string
+  documentTitle?: string
+  fallbackPrintable?: string
+  onPrintDialogClose?: () => void
+  onError?: (error: Error) => void
+  font_size?: string
+  css?: string | string[]
+  style?: string
+  scanStyles?: boolean
+  targetStyle?: string | string[]
+  targetStyles?: string | string[]
+  ignoreElements?: string | string[]
+}
+
+// Check if print-js is available in browser environment
+function getPrintJS(): (config: PrintJSConfig) => void {
+  if (typeof window === 'undefined') {
+    throw new Error('print-js can only be used in browser environment')
+  }
+  
+  if (!printJS) {
+    throw new Error('print-js library not loaded')
+  }
+  
+  return printJS
 }
 
 export interface PrinterSettings {
@@ -119,7 +133,9 @@ export async function printPDFBlob(
       const pdfUrl = URL.createObjectURL(pdfBlob)
 
       try {
-        printJS({
+        const printJSFunc = getPrintJS()
+        
+        printJSFunc({
           printable: pdfUrl,
           type: 'pdf',
           showModal: showModal || !actualSilent,
@@ -141,7 +157,7 @@ export async function printPDFBlob(
         if (actualCopies > 1) {
           for (let i = 1; i < actualCopies; i++) {
             setTimeout(() => {
-              printJS({
+              printJSFunc({
                 printable: pdfUrl,
                 type: 'pdf',
                 showModal: false,
@@ -265,9 +281,11 @@ export async function printTestPage(): Promise<boolean> {
       </div>
     `
 
-    return new Promise((resolve) => {
-      try {
-        printJS({
+    try {
+      const printJSFunc = getPrintJS()
+      
+      return new Promise((resolve) => {
+        printJSFunc({
           printable: testPageContent,
           type: 'html',
           showModal: true,
@@ -288,13 +306,13 @@ export async function printTestPage(): Promise<boolean> {
 
         toast.success('Test page sent to printer!', { id: toastId })
         resolve(true)
+      })
 
-      } catch (error) {
-        console.error('Test print setup error:', error)
-        toast.error('Failed to setup test print.', { id: toastId })
-        resolve(false)
-      }
-    })
+    } catch (error) {
+      console.error('Test print setup error:', error)
+      toast.error('Failed to setup test print.', { id: toastId })
+      return false
+    }
 
   } catch (error) {
     console.error('Test print error:', error)
