@@ -1,7 +1,6 @@
 'use client'
 
 import { toast } from 'sonner'
-import printJS from 'print-js'
 
 // Type definition for print-js configuration
 interface PrintJSConfig {
@@ -25,17 +24,27 @@ interface PrintJSConfig {
   ignoreElements?: string | string[]
 }
 
-// Check if print-js is available in browser environment
-function getPrintJS(): (config: PrintJSConfig) => void {
+// Dynamic import for print-js to ensure client-side only
+async function getPrintJS(): Promise<(config: PrintJSConfig) => void> {
+  // Ensure we're only in browser environment
   if (typeof window === 'undefined') {
     throw new Error('print-js can only be used in browser environment')
   }
   
-  if (!printJS) {
-    throw new Error('print-js library not loaded')
+  try {
+    // Dynamic import to avoid SSR issues
+    const printJSModule = await import('print-js')
+    const printJS = printJSModule.default || printJSModule
+    
+    if (typeof printJS !== 'function') {
+      throw new Error('print-js library not loaded correctly')
+    }
+    
+    return printJS
+  } catch (error) {
+    console.error('Failed to load print-js:', error)
+    throw new Error('Failed to load print library')
   }
-  
-  return printJS
 }
 
 export interface PrinterSettings {
@@ -114,7 +123,7 @@ export async function printPDFBlob(
   pdfBlob: Blob, 
   options: PrintOptions = {}
 ): Promise<boolean> {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     try {
       const {
         documentTitle = 'Invoice',
@@ -133,9 +142,9 @@ export async function printPDFBlob(
       const pdfUrl = URL.createObjectURL(pdfBlob)
 
       try {
-        const printJSFunc = getPrintJS()
+        const printJS = await getPrintJS()
         
-        printJSFunc({
+        printJS({
           printable: pdfUrl,
           type: 'pdf',
           showModal: showModal || !actualSilent,
@@ -157,7 +166,7 @@ export async function printPDFBlob(
         if (actualCopies > 1) {
           for (let i = 1; i < actualCopies; i++) {
             setTimeout(() => {
-              printJSFunc({
+              printJS({
                 printable: pdfUrl,
                 type: 'pdf',
                 showModal: false,
@@ -282,10 +291,10 @@ export async function printTestPage(): Promise<boolean> {
     `
 
     try {
-      const printJSFunc = getPrintJS()
+      const printJS = await getPrintJS()
       
       return new Promise((resolve) => {
-        printJSFunc({
+        printJS({
           printable: testPageContent,
           type: 'html',
           showModal: true,
