@@ -5,11 +5,14 @@ import { FixedSizeGrid as Grid } from 'react-window'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Package, AlertTriangle } from 'lucide-react'
+import { Package, AlertTriangle, Clock, DollarSign } from 'lucide-react'
 import { Product } from '@/lib/stores/pos-store'
 import { UnitSelectorDialog } from './unit-selector-dialog'
 import { useDebouncedProductSearch } from '@/lib/hooks/use-debounced-search'
 import { useSettings } from '@/lib/hooks/use-shallow-store'
+import { usePOSStore } from '@/lib/stores/pos-store'
+import { lastSoldPricesCache } from '@/lib/database'
+import { toast } from 'sonner'
 
 interface ProductGridProps {
   products: Product[]
@@ -28,6 +31,16 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
   const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const { taxMode } = useSettings()
+  
+  // Get store state for pricing strategy
+  const { 
+    pricingStrategy, 
+    selectedBranch,
+    lastSoldPrices,
+    setLastSoldPrice,
+    priceFetchingStatus,
+    setPriceFetchingStatus
+  } = usePOSStore()
 
   // Get unique categories
   const categories = useMemo(() => {
@@ -68,6 +81,123 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
     return baseProducts.filter(product => product.group_name === selectedCategory)
   }, [products, searchResults, searchQuery, selectedCategory, hasSearchIndex])
 
+  // Fetch last sold prices from Supabase when pricing strategy changes or branch changes
+  const fetchLastSoldPrices = useCallback(async () => {
+    if (pricingStrategy !== 'lastSoldPrice' || !selectedBranch || filteredProducts.length === 0) {
+      return
+    }
+
+    try {
+      console.log(`[PRICING] Fetching Supabase prices for branch ${selectedBranch.id}`)
+      
+      // Mark visible products as loading
+      const visibleProductIds = filteredProducts.slice(0, 60).map(p => p.id)
+      visibleProductIds.forEach(productId => setPriceFetchingStatus(productId, 'loading'))
+
+      // Fetch from Supabase API
+      const res = await fetch('/api/pos/last-sold-prices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          product_ids: visibleProductIds, 
+          branch_id: selectedBranch.id 
+        }),
+      })
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+
+      const data = await res.json()
+      
+      if (data.success && data.prices) {
+        // Load prices into store
+        data.prices.forEach((priceData: any) => {
+          const key = `${priceData.product_id}_${priceData.branch_id}_${priceData.unit}`
+          const lastSoldPrice = {
+            productId: priceData.product_id,
+            branchId: priceData.branch_id,
+            unit: priceData.unit,
+            price: priceData.price,
+            date: priceData.created_at,
+            taxMode: priceData.tax_mode,
+          }
+          setLastSoldPrice(key, lastSoldPrice)
+          setPriceFetchingStatus(priceData.product_id, 'loaded')
+        })
+
+        // Set error status for products that don't have saved prices
+        const foundProductIds = data.prices.map((p: any) => p.product_id)
+        visibleProductIds.forEach(id => {
+          if (!foundProductIds.includes(id)) {
+            setPriceFetchingStatus(id, 'error')
+          }
+        })
+
+        console.log(`[PRICING] Loaded ${data.prices.length} prices from Supabase`)
+      }
+    } catch (error) {
+      console.error('[PRICING] Error fetching last sold prices from Supabase:', error)
+      const ids = filteredProducts.slice(0, 60).map(p => p.id)
+      ids.forEach(productId => setPriceFetchingStatus(productId, 'error'))
+    }
+  }, [pricingStrategy, selectedBranch, filteredProducts, setLastSoldPrice, setPriceFetchingStatus])
+
+  // Trigger price fetching when conditions change
+  useEffect(() => {
+    fetchLastSoldPrices()
+  }, [fetchLastSoldPrices])
+
+  // Calculate displayed price for a product
+  const getDisplayPrice = useCallback((product: Product) => {
+    if (pricingStrategy === 'lastSoldPrice' && selectedBranch) {
+      const key = `${product.id}_${selectedBranch.id}_PCS`
+      const lastSoldPrice = lastSoldPrices.get(key)
+      
+      if (lastSoldPrice) {
+        // Adjust price for current tax mode if different from when it was sold
+        let adjustedPrice = lastSoldPrice.price
+        if (lastSoldPrice.taxMode !== taxMode) {
+          if (lastSoldPrice.taxMode === 'inclusive' && taxMode === 'exclusive') {
+            adjustedPrice = adjustedPrice / 1.15
+          } else if (lastSoldPrice.taxMode === 'exclusive' && taxMode === 'inclusive') {
+            adjustedPrice = adjustedPrice * 1.15
+          }
+        }
+        return {
+          price: adjustedPrice,
+          source: 'lastSold' as const,
+          date: lastSoldPrice.date,
+          isLoading: false
+        }
+      }
+      
+      // Check if we're currently loading this price
+      const fetchStatus = priceFetchingStatus.get(product.id)
+      if (fetchStatus === 'loading') {
+        return {
+          price: product.price,
+          source: 'default' as const,
+          date: null,
+          isLoading: true
+        }
+      }
+    }
+    
+    // Default pricing
+    let price = product.price
+    if (taxMode === 'inclusive') {
+      price = price * 1.15
+    }
+    
+    return {
+      price,
+      source: 'default' as const,
+      date: null,
+      isLoading: false
+    }
+  }, [pricingStrategy, selectedBranch, lastSoldPrices, taxMode, priceFetchingStatus])
+
   // Calculate grid dimensions based on container width
   const gridConfig = useMemo(() => {
     const containerWidth = containerDimensions.width
@@ -89,12 +219,100 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
     return {
       columnCount,
       columnWidth: Math.max(columnWidth, 150), // Minimum width
-      itemHeight: 180, // Optimized height for compact layout
+      itemHeight: 200, // Increased height to accommodate pricing info
     }
   }, [containerDimensions.width])
 
   // Calculate row count
   const rowCount = Math.ceil(filteredProducts.length / gridConfig.columnCount)
+
+  // Product Card Component
+  const ProductCard = useCallback(({ product }: { product: Product }) => {
+    const priceInfo = getDisplayPrice(product)
+    
+    return (
+      <Card 
+        className="h-full cursor-pointer hover:shadow-md transition-all duration-200 border border-border/50"
+        onClick={() => onAddToCart(product)}
+      >
+        <CardContent className="p-4 h-full flex flex-col">
+          <div className="flex-1">
+            <div className="flex items-start justify-between mb-2">
+              <div className="flex-1 min-w-0">
+                <h3 className="font-medium text-sm leading-tight truncate" title={product.name}>
+                  {product.name}
+                </h3>
+                <p className="text-xs text-muted-foreground truncate mt-1" title={product.sku}>
+                  {product.sku}
+                </p>
+              </div>
+              {product.group_name && (
+                <Badge variant="secondary" className="ml-2 text-xs shrink-0">
+                  {product.group_name}
+                </Badge>
+              )}
+            </div>
+            
+            {/* Price Display */}
+            <div className="mt-auto pt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  {priceInfo.isLoading ? (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3 animate-spin" />
+                      Loading price...
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1">
+                        <span className="font-semibold text-lg">
+                          {priceInfo.price.toFixed(2)} SAR
+                        </span>
+                        {priceInfo.source === 'lastSold' && (
+                          <DollarSign className="h-3 w-3 text-green-600" />
+                        )}
+                      </div>
+                      {priceInfo.source === 'lastSold' && priceInfo.date && (
+                        <span className="text-xs text-green-600">
+                          Last sold: {new Date(priceInfo.date).toLocaleDateString()}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-muted-foreground">
+                    Stock: {product.stock_on_hand || 0}
+                  </div>
+                  {product.defaultUnit && (
+                    <div className="text-xs text-muted-foreground">
+                      Unit: {product.defaultUnit}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }, [getDisplayPrice, onAddToCart])
+
+  // Grid Cell Component
+  const Cell = useCallback(({ columnIndex, rowIndex, style }: any) => {
+    const productIndex = rowIndex * gridConfig.columnCount + columnIndex
+    const product = filteredProducts[productIndex]
+
+    if (!product) {
+      return <div style={style} />
+    }
+
+    return (
+      <div style={{ ...style, padding: '12px' }}>
+        <ProductCard product={product} />
+      </div>
+    )
+  }, [filteredProducts, gridConfig.columnCount, ProductCard])
 
   // Update container dimensions on resize
   useEffect(() => {
@@ -148,37 +366,21 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
               <h3 className="text-xl font-medium mb-3 tracking-tight">No products found</h3>
               <p className="text-muted-foreground/80 mb-6 max-w-sm">
                 {searchQuery 
-                  ? `No products match "${searchQuery}"` 
-                  : 'No products available in this category'
+                  ? `No products match "${searchQuery}". Try a different search term.`
+                  : 'No products available in this category.'
                 }
               </p>
-              <div className="text-sm text-muted-foreground/60">
-                Press <kbd className="px-2 py-1 bg-muted/50 rounded-md text-xs font-mono">Ctrl+Space</kbd> to search
-              </div>
-            </div>
-          ) : (isSearching && searchQuery.trim()) ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-foreground"></div>
-                <span>Searching...</span>
-              </div>
             </div>
           ) : containerDimensions.width > 0 ? (
             <Grid
               columnCount={gridConfig.columnCount}
               columnWidth={gridConfig.columnWidth}
-              height={containerDimensions.height - 64} // Subtract padding
-              width={containerDimensions.width}
+              height={containerDimensions.height - 64} // Account for padding
               rowCount={rowCount}
               rowHeight={gridConfig.itemHeight}
-              itemData={{
-                products: filteredProducts,
-                columnCount: gridConfig.columnCount,
-                taxMode,
-                onAddToCart,
-              }}
+              width={containerDimensions.width}
             >
-              {VirtualizedProductCard}
+              {Cell}
             </Grid>
           ) : null}
         </div>
@@ -187,175 +389,20 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
   )
 })
 
-interface ProductCardProps {
-  product: Product
-  taxMode: 'inclusive' | 'exclusive'
-  onAddToCart: (product: Product, quantity?: number, unit?: string, customPrice?: number) => void
-}
-
-const ProductCard = React.memo(function ProductCard({ product, taxMode, onAddToCart }: ProductCardProps) {
-  const [showUnitDialog, setShowUnitDialog] = useState(false)
-  const [isPressed, setIsPressed] = useState(false)
-  
-  const isLowStock = product.stock < 10
-  const isOutOfStock = product.stock === 0
-  
-  // Check if product has unit conversion capabilities
-  const hasUnitConversion = product.hasConversion && product.piecesPerCarton && product.piecesPerCarton > 1
-
-  // Calculate display price based on tax mode
-  const displayPrice = taxMode === 'inclusive' ? product.price * 1.15 : product.price
-
-  // Click handlers
-  const handleMouseDown = () => {
-    if (isOutOfStock) return
-    setIsPressed(true)
-  }
-
-  const handleMouseUp = () => {
-    setIsPressed(false)
-    
-    // Single click always opens the unit selector dialog
-    if (!isOutOfStock) {
-      setShowUnitDialog(true)
-    }
-  }
-
-  const handleMouseLeave = () => {
-    setIsPressed(false)
-  }
-
-  const handleDialogAddToCart = (prod: Product, quantity: number, unit: string, customPrice?: number) => {
-    onAddToCart(prod, quantity, unit, customPrice)
-  }
-
-  return (
-    <>
-      <Card 
-        className={`group cursor-pointer transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:scale-[1.02] border-border/40 select-none h-full ${
-          isOutOfStock ? 'opacity-40 cursor-not-allowed' : ''
-        } ${
-          isPressed ? 'scale-[0.95] shadow-inner' : ''
-        }`}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseLeave}
-        onTouchStart={handleMouseDown}
-        onTouchEnd={handleMouseUp}
-      >
-      <CardContent className="p-3 flex flex-col h-full">
-        {/* Product Header */}
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-medium text-sm leading-tight line-clamp-3 mb-1" title={product.name}>
-              {product.name}
-            </h3>
-          </div>
-          <div className="flex flex-col items-end gap-1 flex-shrink-0">
-            <Badge 
-              variant={isOutOfStock ? 'destructive' : isLowStock ? 'secondary' : 'outline'}
-              className="text-xs px-2 py-0.5 rounded-full font-medium border-0"
-            >
-              {product.stock}
-            </Badge>
-            {isLowStock && !isOutOfStock && (
-              <AlertTriangle className="h-3 w-3 text-yellow-500/80" />
-            )}
-          </div>
+const ProductCardSkeleton = () => (
+  <Card className="h-[180px]">
+    <CardContent className="p-4 h-full">
+      <div className="space-y-3">
+        <div>
+          <Skeleton className="h-4 w-full mb-2" />
+          <Skeleton className="h-3 w-2/3" />
         </div>
-
-        {/* Spacer */}
-        <div className="flex-1"></div>
-
-        {/* Price - Fixed at bottom */}
-        <div className="text-center py-0.5 mt-auto">
-          <div className="text-lg font-semibold tracking-tight">
-            {displayPrice.toFixed(2)}
-          </div>
-          <div className="text-xs text-muted-foreground/60">
-            per unit {taxMode === 'inclusive' ? '(inc. tax)' : ''}
-          </div>
-          {/* Status indicator */}
-          {isOutOfStock && (
-            <div className="text-xs text-muted-foreground/80 font-medium mt-1">
-              Out of Stock
-            </div>
-          )}
+        <Skeleton className="h-3 w-1/3" />
+        <div className="mt-auto pt-4">
+          <Skeleton className="h-6 w-20 mb-1" />
+          <Skeleton className="h-3 w-16" />
         </div>
-      </CardContent>
-      </Card>
-      
-      {/* Unit Selector Dialog */}
-      <UnitSelectorDialog
-        product={product}
-        open={showUnitDialog}
-        onClose={() => setShowUnitDialog(false)}
-        onAddToCart={handleDialogAddToCart}
-        taxMode={taxMode}
-      />
-    </>
-  )
-})
-
-// Virtualized product card component
-interface VirtualizedProductCardProps {
-  columnIndex: number
-  rowIndex: number
-  style: React.CSSProperties
-  data: {
-    products: Product[]
-    columnCount: number
-    taxMode: 'inclusive' | 'exclusive'
-    onAddToCart: (product: Product, quantity?: number, unit?: string, customPrice?: number) => void
-  }
-}
-
-const VirtualizedProductCard = React.memo<VirtualizedProductCardProps>(function VirtualizedProductCard({ 
-  columnIndex, 
-  rowIndex, 
-  style, 
-  data 
-}) {
-  const { products, columnCount, taxMode, onAddToCart } = data
-  const productIndex = rowIndex * columnCount + columnIndex
-  const product = products[productIndex]
-
-  if (!product) {
-    return <div style={style} />
-  }
-
-  return (
-    <div style={style} className="p-3">
-      <ProductCard
-        product={product}
-        taxMode={taxMode}
-        onAddToCart={onAddToCart}
-      />
-    </div>
-  )
-})
-
-const ProductCardSkeleton = React.memo(function ProductCardSkeleton() {
-  return (
-    <Card className="group border-border/40">
-      <CardContent className="p-3">
-        {/* Product Header */}
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex-1 min-w-0">
-            <Skeleton className="h-4 w-full mb-1" />
-            <Skeleton className="h-4 w-4/5 mb-1" />
-            <Skeleton className="h-4 w-3/4 mb-2" />
-            <Skeleton className="h-3 w-1/2" />
-          </div>
-          <Skeleton className="h-6 w-10 rounded-full flex-shrink-0" />
-        </div>
-
-        {/* Price */}
-        <div className="text-center mt-6">
-          <Skeleton className="h-6 w-16 mx-auto mb-1" />
-          <Skeleton className="h-3 w-12 mx-auto" />
-        </div>
-      </CardContent>
-    </Card>
-  )
-})
+      </div>
+    </CardContent>
+  </Card>
+)

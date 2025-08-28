@@ -3,25 +3,23 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Header } from '@/components/header'
 import { ProductGrid } from '@/components/pos/product-grid'
-import { CartSidebar } from '@/components/pos/cart-sidebar'
+import { CartSidebarWrapper } from '@/components/pos/cart-sidebar-wrapper'
 import { Spotlight } from '@/components/spotlight/spotlight'
 import { Product, Customer } from '@/lib/stores/pos-store'
 import { useDebounce } from '@/lib/hooks/use-debounced-search'
 import { 
-  useProducts, 
-  useCustomers, 
   useCartActions, 
   useDataActions,
   useCartSummary,
   useCustomerSelection 
 } from '@/lib/hooks/use-shallow-store'
+import { useCachedProducts, useCachedCustomers } from '@/lib/hooks/use-cached-data'
 import { toast } from 'sonner'
 
 export function POSPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedSearchQuery = useDebounce(searchQuery, 200)
   const [isOnline, setIsOnline] = useState(true)
-  const [isLoadingProducts, setIsLoadingProducts] = useState(false)
 
   // Monitor online status
   useEffect(() => {
@@ -39,44 +37,63 @@ export function POSPage() {
     }
   }, [])
   
-  // Use optimized selectors to prevent re-renders
-  const products = useProducts()
-  const customers = useCustomers()
+  // Use cached data hooks with long cache duration for POS
+  const { 
+    products, 
+    isLoading: isLoadingProducts, 
+    error: productsError,
+    syncStatus: productsSyncStatus,
+    forceSync: forceProductsSync
+  } = useCachedProducts({
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours for items
+    staleTime: 60 * 60 * 1000, // 1 hour before considered stale
+    enableBackgroundSync: true,
+    retryOnError: true
+  })
+
+  const { 
+    customers, 
+    isLoading: isLoadingCustomers, 
+    error: customersError,
+    syncStatus: customersSyncStatus,
+    forceSync: forceCustomersSync
+  } = useCachedCustomers({
+    maxAge: 12 * 60 * 60 * 1000, // 12 hours for customers
+    staleTime: 60 * 60 * 1000, // 1 hour before considered stale
+    enableBackgroundSync: true,
+    retryOnError: true
+  })
+
   const { addToCart, clearCart } = useCartActions()
   const { setProducts, setCustomers } = useDataActions()
   const { setSelectedCustomer } = useCustomerSelection()
   const { cartCount } = useCartSummary()
 
-  // Simple data fetching without cached hooks to avoid infinite loops
+  // Sync products and customers to Zustand store when cache updates
   useEffect(() => {
-    const fetchInitialData = async () => {
-      if (products.length === 0) {
-        setIsLoadingProducts(true)
-        try {
-          // Fetch products
-          const productsResponse = await fetch('/api/items?limit=200')
-          if (productsResponse.ok) {
-            const productsData = await productsResponse.json()
-            setProducts(productsData.items || [])
-          }
-
-          // Fetch customers
-          const customersResponse = await fetch('/api/customers?limit=100')
-          if (customersResponse.ok) {
-            const customersData = await customersResponse.json()
-            setCustomers(customersData.customers || [])
-          }
-        } catch (error) {
-          console.error('Failed to fetch initial data:', error)
-          toast.error('Failed to load data')
-        } finally {
-          setIsLoadingProducts(false)
-        }
-      }
+    if (products.length > 0) {
+      setProducts(products)
     }
+  }, [products])
 
-    fetchInitialData()
-  }, [products.length, setProducts, setCustomers])
+  useEffect(() => {
+    if (customers.length > 0) {
+      setCustomers(customers)
+    }
+  }, [customers])
+
+  // Show error toasts for failed syncs
+  useEffect(() => {
+    if (productsError) {
+      toast.error('Failed to sync products. Using cached data.')
+    }
+  }, [productsError])
+
+  useEffect(() => {
+    if (customersError) {
+      toast.error('Failed to sync customers. Using cached data.')
+    }
+  }, [customersError])
 
   const handleSpotlightAddToCart = useCallback((product: Product, quantity = 1, unit?: string, customPrice?: number) => {
     addToCart(product, quantity, unit, customPrice)
@@ -91,6 +108,12 @@ export function POSPage() {
         break
       case 'new-invoice':
         toast.info('Invoice creation not implemented yet')
+        break
+      case 'refresh-data':
+        // Force refresh both products and customers
+        forceProductsSync()
+        forceCustomersSync()
+        toast.info('Refreshing data from server...')
         break
       case 'switch-theme':
         // Theme switching is handled by the header
@@ -112,7 +135,7 @@ export function POSPage() {
       default:
         console.log('Unknown action:', action)
     }
-  }, [clearCart, customers, setSelectedCustomer])
+  }, [clearCart, customers, setSelectedCustomer, forceProductsSync, forceCustomersSync])
 
   const handleSpotlightNavigate = useCallback((path: string) => {
     window.location.href = path
@@ -124,7 +147,8 @@ export function POSPage() {
         cartCount={cartCount} 
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        syncStatus={isLoadingProducts ? 'syncing' : 'idle'}
+        syncStatus={(productsSyncStatus === 'syncing' || customersSyncStatus === 'syncing') ? 'syncing' : 
+                   (productsSyncStatus === 'error' || customersSyncStatus === 'error') ? 'error' : 'idle'}
         isOnline={isOnline}
       />
       
@@ -138,7 +162,7 @@ export function POSPage() {
           />
         </div>
         
-        <CartSidebar />
+        <CartSidebarWrapper />
       </main>
 
       <Spotlight 
