@@ -112,7 +112,7 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
       
       if (data.success && data.prices) {
         // Load prices into store
-        data.prices.forEach((priceData: any) => {
+        data.prices.forEach((priceData: { product_id: string; branch_id: string; unit: string; price: number; created_at: string; tax_mode: string }) => {
           const key = `${priceData.product_id}_${priceData.branch_id}_${priceData.unit}`
           const lastSoldPrice = {
             productId: priceData.product_id,
@@ -127,7 +127,7 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
         })
 
         // Set error status for products that don't have saved prices
-        const foundProductIds = data.prices.map((p: any) => p.product_id)
+        const foundProductIds = data.prices.map((p: { product_id: string }) => p.product_id)
         visibleProductIds.forEach(id => {
           if (!foundProductIds.includes(id)) {
             setPriceFetchingStatus(id, 'error')
@@ -299,7 +299,7 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
   }, [getDisplayPrice, onAddToCart])
 
   // Grid Cell Component
-  const Cell = useCallback(({ columnIndex, rowIndex, style }: any) => {
+  const Cell = useCallback(({ columnIndex, rowIndex, style }: { columnIndex: number; rowIndex: number; style: React.CSSProperties }) => {
     const productIndex = rowIndex * gridConfig.columnCount + columnIndex
     const product = filteredProducts[productIndex]
 
