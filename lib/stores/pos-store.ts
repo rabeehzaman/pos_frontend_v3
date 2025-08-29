@@ -343,10 +343,10 @@ export const usePOSStore = create<POSState>()((set, get) => ({
               if (data.success) {
                 console.log(`[PRICING] Saved custom price for ${product.name}: ${customPrice} SAR`)
                 // Update the in-memory cache with the new price
-                const key = `${product.id}_${state.selectedBranch.id}_${unit}`
+                const key = `${product.id}_${state.selectedBranch?.id}_${unit}`
                 state.setLastSoldPrice(key, {
                   productId: product.id,
-                  branchId: state.selectedBranch.id,
+                  branchId: state.selectedBranch?.id || '',
                   unit,
                   price: customPrice,
                   date: new Date().toISOString(),

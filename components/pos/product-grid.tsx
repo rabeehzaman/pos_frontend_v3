@@ -5,14 +5,11 @@ import { FixedSizeGrid as Grid } from 'react-window'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Package, AlertTriangle, Clock, DollarSign } from 'lucide-react'
+import { Package, Clock, DollarSign } from 'lucide-react'
 import { Product } from '@/lib/stores/pos-store'
-import { UnitSelectorDialog } from './unit-selector-dialog'
 import { useDebouncedProductSearch } from '@/lib/hooks/use-debounced-search'
 import { useSettings } from '@/lib/hooks/use-shallow-store'
 import { usePOSStore } from '@/lib/stores/pos-store'
-import { lastSoldPricesCache } from '@/lib/database'
-import { toast } from 'sonner'
 
 interface ProductGridProps {
   products: Product[]
@@ -120,7 +117,7 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
             unit: priceData.unit,
             price: priceData.price,
             date: priceData.created_at,
-            taxMode: priceData.tax_mode,
+            taxMode: priceData.tax_mode as 'inclusive' | 'exclusive',
           }
           setLastSoldPrice(key, lastSoldPrice)
           setPriceFetchingStatus(priceData.product_id, 'loaded')
@@ -282,7 +279,7 @@ export const ProductGrid = React.memo<ProductGridProps>(function ProductGrid({
                 </div>
                 <div className="text-right">
                   <div className="text-xs text-muted-foreground">
-                    Stock: {product.stock_on_hand || 0}
+                    Stock: {(product as Product & { stock_on_hand?: number }).stock_on_hand || 0}
                   </div>
                   {product.defaultUnit && (
                     <div className="text-xs text-muted-foreground">

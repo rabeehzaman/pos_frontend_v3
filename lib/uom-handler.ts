@@ -118,7 +118,7 @@ export class UOMHandler {
         type: 'carton',
         piecesPerUnit: 0, // Unknown conversion
         display: 'Carton (conversion not available)',
-        conversionId: null
+        conversionId: undefined
       }
     }
 

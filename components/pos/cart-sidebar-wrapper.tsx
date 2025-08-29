@@ -15,9 +15,9 @@ import { toast } from 'sonner'
 export function CartSidebarWrapper() {
   const cart = useCart()
   const customers = useCustomers()
-  const { selectedCustomer } = useCustomerSelection()
+  const { selectedCustomer, setSelectedCustomer } = useCustomerSelection()
   const { taxMode, selectedBranch } = useSettings()
-  const { updateCartItem, removeFromCart, clearCart, setSelectedCustomer } = useCartActions()
+  const { updateCartItem, removeFromCart, clearCart } = useCartActions()
   
   const handleUpdateQuantity = useCallback((id: string, unit: string, quantity: number) => {
     updateCartItem(id, { qty: quantity })

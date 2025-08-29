@@ -199,6 +199,9 @@ export const productsCache = {
     const db = await initDB()
     await db.put('metadata', {
       key,
+      lastSync: Date.now(),
+      version: 1,
+      status: 'synced' as const,
       ...metadata,
     })
   },
@@ -277,6 +280,9 @@ export const customersCache = {
     const db = await initDB()
     await db.put('metadata', {
       key,
+      lastSync: Date.now(),
+      version: 1,
+      status: 'synced' as const,
       ...metadata,
     })
   },
@@ -328,7 +334,7 @@ export const cacheManager = {
     
     if (!metadata?.lastSync) return true
     
-    return Date.now() - metadata.lastSync > maxAge
+    return Date.now() - Number(metadata.lastSync) > maxAge
   },
 
   async getSyncStatus(cacheType: 'products' | 'customers'): Promise<{
@@ -348,8 +354,8 @@ export const cacheManager = {
     }
 
     return {
-      lastSync: metadata.lastSync,
-      status: metadata.status,
+      lastSync: Number(metadata.lastSync) || null,
+      status: metadata.status as 'syncing' | 'synced' | 'error',
       isStale: await this.isStale(cacheType),
     }
   },

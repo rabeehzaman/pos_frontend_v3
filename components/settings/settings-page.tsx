@@ -326,7 +326,7 @@ export function SettingsPage() {
                         authStatus.needsReauth ? 'text-yellow-600 font-medium' :
                         'text-muted-foreground'
                       }>
-                        {parseFloat(authStatus.tokenExpiresInHours).toFixed(1)} hours
+                        {parseFloat(String(authStatus.tokenExpiresInHours)).toFixed(1)} hours
                       </span>
                     </div>
                   )}
