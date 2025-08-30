@@ -15,8 +15,14 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Build arguments for environment variables
+ARG SUPABASE_URL
+ARG SUPABASE_ANON_KEY
+
 # Environment variables for build
 ENV NEXT_TELEMETRY_DISABLED 1
+ENV SUPABASE_URL=$SUPABASE_URL
+ENV SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
 
 RUN npm run build
 
